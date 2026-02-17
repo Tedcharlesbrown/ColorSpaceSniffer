@@ -1,0 +1,158 @@
+ocio_profile_version: 2
+
+###############################################################################
+# CONFIG NAME
+###############################################################################
+
+name: "My Studio Config v0.1"
+
+###############################################################################
+# DESCRIPTION
+###############################################################################
+# -----------------------------------------------------------------------------
+# Write a description of this configuration here.
+#
+# Example:
+# This OCIO configuration defines a minimal scene-linear workflow for
+# internal rendering and display transforms. It contains placeholder
+# input transforms (IDTs) and output transforms (ODTs) intended to be
+# replaced with production LUTs or mathematical transforms.
+#
+# Author:
+# Date:
+# Version Notes:
+# -----------------------------------------------------------------------------
+
+description: |
+  <Write a longer multi-line description here if desired.>
+  <Explain purpose, target pipeline, ACES compatibility, etc.>
+
+###############################################################################
+# SEARCH PATH
+###############################################################################
+
+search_path: luts
+
+###############################################################################
+# ROLES
+###############################################################################
+
+roles:
+  scene_linear: scene_linear
+  reference: scene_linear
+  color_picking: scene_linear
+  compositing_log: input_dummy_log
+  data: data
+  default: scene_linear
+
+###############################################################################
+# FILE RULES (Optional but recommended)
+###############################################################################
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: scene_linear}
+
+###############################################################################
+# COLORS SPACES
+###############################################################################
+
+colorspaces:
+
+  ###########################################################################
+  # SCENE LINEAR WORKING SPACE
+  ###########################################################################
+  - !<ColorSpace>
+    name: scene_linear
+    family: Working
+    categories: [working, scene-referred]
+    encoding: scene-linear
+    equalitygroup:
+    bitdepth: 32f
+    isdata: false
+    description: |
+      Primary scene-linear working space.
+      Replace transform with real primaries if needed.
+
+    from_reference: !<MatrixTransform>
+      matrix: [ 1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1 ]
+
+  ###########################################################################
+  # DUMMY INPUT TRANSFORM (IDT)
+  ###########################################################################
+  - !<ColorSpace>
+    name: ARRI LogC3 800EI
+    family: Input
+    categories: [input, camera]
+    encoding: log
+    equalitygroup:
+    bitdepth: 32f
+    isdata: false
+    description: |
+      input transform for footage shot in Arrilogc3, 800EI to Aces 2065-1
+
+    to_reference: !<GroupTransform>
+      children:
+        - !<FileTransform>
+          src: ARRILogC3800EI_acesTrans_2065_1.cube
+          interpolation: tetrahedral
+
+  ###########################################################################
+  # DISPLAY-REFERRED OUTPUT SPACE
+  ###########################################################################
+  - !<ColorSpace>
+    name: rec.709 bt.1886
+    family: Output
+    categories: [output, display]
+    encoding: sdr-video
+    equalitygroup:
+    bitdepth: 32f
+    isdata: false
+    description: |
+      transform to go from 2065-1 to rec709 bt1886
+
+    from_reference: !<GroupTransform>
+      children:
+        - !<FileTransform>
+          src: 2065_1_acesTrans_r709_bt1886_16.cube
+          interpolation: tetrahedral
+
+  ###########################################################################
+  # DATA SPACE
+  ###########################################################################
+  - !<ColorSpace>
+    name: data
+    family: Utility
+    categories: [data]
+    encoding: data
+    bitdepth: 32f
+    isdata: true
+
+###############################################################################
+# DISPLAYS / VIEWS
+###############################################################################
+
+displays:
+
+  sRGB_Display:
+    - !<View>
+      name: rec.709 bt.1886
+      colorspace: output_dummy_rec709
+      looks:
+
+###############################################################################
+# LOOKS (Optional)
+###############################################################################
+
+#looks:
+#
+#  - !<Look>
+#    name: dummy_look
+#    process_space: scene_linear
+#    description: |
+#      Placeholder look. Replace with creative LUT if desired.
+#    transform: !<FileTransform>
+#      src: dummy_look.cube
+#      interpolation: linear

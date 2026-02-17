@@ -1,0 +1,19 @@
+# Video
+*.mov
+*.mp4
+*.avi
+
+# Images
+*.png
+*.jpg
+*.exr
+
+# LUT outputs
+output/
+
+# Resolve / temp
+*.drx
+
+# OS junk
+.DS_Store
+Thumbs.db
