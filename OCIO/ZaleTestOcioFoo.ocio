@@ -2,7 +2,7 @@ ocio_profile_version: 2.4
 
 environment:
   {}
-search_path: "LUTs"
+search_path: "../LUTs"
 strictparsing: true
 luma: [0.2126, 0.7152, 0.0722]
 name: studio-config-all-views-v3.0.0_aces-v2.0_ocio-v2.4

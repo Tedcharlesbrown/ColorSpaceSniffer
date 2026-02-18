@@ -5,6 +5,32 @@ import subprocess
 import PyOpenColorIO as OCIO
 import os
 
+STILL_IMAGE_EXTENSIONS = ('.tiff', '.tif', '.png', '.exr', '.jpg', '.jpeg', '.dpx')
+
+def load_image(ImagePath):
+    """Load a single still image as a normalized float32 frame. Supports 8-bit and 16-bit."""
+    raw = cv.imread(ImagePath, cv.IMREAD_UNCHANGED)
+    if raw is None:
+        raise ValueError(f"Could not read image: {ImagePath}")
+
+    # Convert to float32 and normalize based on bit depth
+    if raw.dtype == np.uint8:
+        frame = raw.astype(np.float32) / 255.0
+    elif raw.dtype == np.uint16:
+        frame = raw.astype(np.float32) / 65535.0
+    else:
+        frame = raw.astype(np.float32)
+
+    # Ensure 3 channels, then convert BGR→RGB to match extract_frames()
+    if len(frame.shape) == 2:
+        frame = cv.cvtColor(frame, cv.COLOR_GRAY2RGB)
+    elif frame.shape[2] == 4:
+        frame = cv.cvtColor(frame[:, :, :3], cv.COLOR_BGR2RGB)
+    else:
+        frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+
+    return [frame]  # return as list to match video frame array interface
+
 def encode_hap_video(input_file, output_file):
     subprocess.run([
         'ffmpeg',

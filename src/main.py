@@ -4,88 +4,63 @@ import numpy as np
 import PyOpenColorIO as OCIO
 import argparse
 import os
-from processing import extract_frames, OCIO_CST
-# from metrics import ScoreIDTtransforms # Uncomment when ready to use scoring
+import csv
+from processing import extract_frames, OCIO_CST, load_image, STILL_IMAGE_EXTENSIONS
+from metrics import ScoreIDTtransforms, BlackPedestalCheck
+from gamut_wall import gamut_wall_test
 
 def main():
-    # FIX: replaced hardcoded Windows paths with CLI arguments
     parser = argparse.ArgumentParser(description='ColorSpaceSniffer — identify the best IDT for your footage')
-    parser.add_argument('video', help='Path to source video file')
-    parser.add_argument('config', help='Path to OCIO config file (.ocio)')
+    parser.add_argument('video', help='Path to source video file or still image (.tiff, .png, .exr, etc.)')
+    parser.add_argument('--config', default=None, help='Path to OCIO config file (.ocio). Default: ACES Studio Config v4.0.0 (built-in)')
     parser.add_argument('--samples', type=int, default=1, help='Number of frames to sample (default: 1)')
     parser.add_argument('--output', default='output', help='Output directory for preview images (default: ./output)')
     args = parser.parse_args()
 
-    ###Setting the OCIO Config 
-    config = OCIO.Config.CreateFromFile(args.config)
+    ###Setting the OCIO Config
+    if args.config:
+        config = OCIO.Config.CreateFromFile(args.config)
+        print(f"Using OCIO config: {args.config}")
+    else:
+        config = OCIO.Config.CreateFromBuiltinConfig('studio-config-v4.0.0_aces-v2.0_ocio-v2.5')
+        print("Using built-in ACES Studio Config v4.0.0 (ACES v2.0, OCIO v2.5)")
 
-    ###Setting the OCIO transforms to be appraised during this appraisal    
-    IDTs = []
-
-    DJI_IDT = "D-Log D-Gamut"
-    IDTs.append(DJI_IDT)
-    Apple_IDT = "Apple Log"
-    IDTs.append(Apple_IDT)
-    LogC3_IDT = "ARRI LogC3 (EI800)"
-    IDTs.append(LogC3_IDT)
-    #AWG3_IDT = "Linear ARRI Wide Gamut 3"
-    #IDTs.append(AWG3_IDT)
-    LogC4_IDT = "ARRI LogC4"
-    IDTs.append(LogC4_IDT)
-    #AWG4_IDT = "Linear ARRI Wide Gamut 4"
-    #IDTs.append(AWG4_IDT)
-#    BMDLog_IDT = "BMDFilm WideGamut Gen5"
-#    IDTs.append(BMDLog_IDT)
-    #BMDLin_IDT = "Linear BMD WideGamut Gen5"
-    #IDTs.append(BMDLin_IDT)
-    CLog2_IDT = "CanonLog2 CinemaGamut D55"
-    IDTs.append(CLog2_IDT)
-    #CanonLinear_IDT = "Linear CinemaGamut D55"
-    #IDTs.append(CanonLinear_IDT)
-    CLog3_IDT = "CanonLog3 CinemaGamut D55"
-    IDTs.append(CLog3_IDT)
-    #VLin_IDT = "Linear V-Gamut"
-    #IDTs.append(VLin_IDT)
-    VLogVGamut_IDT = "V-Log V-Gamut"
-    IDTs.append(VLogVGamut_IDT)
-    #LinRWD_IDT = "Linear REDWideGamutRGB"
-    #IDTs.append(LinRWD_IDT)
-    Log3G10_IDT = "Log3G10 REDWideGamutRGB"
-    IDTs.append(Log3G10_IDT)
-    #LinSGamut3_IDT = "Linear S-Gamut3"
-    #IDTs.append(LinSGamut3_IDT)
-    SLOG_IDT = "S-Log3 S-Gamut3"
-    IDTs.append(SLOG_IDT)
-    #LinSGamut3cine_IDT = "Linear S-Gamut3.Cine"
-    #IDTs.append(LinSGamut3cine_IDT)
-#    SLOGcine_IDT = "S-Log3 S-Gamut3.Cine"
-#    IDTs.append(SLOGcine_IDT)
-    #LinVeniceSGamut3_IDT = "Linear Venice S-Gamut3"
-    #IDTs.append(LinVeniceSGamut3_IDT)
-    #SLog3Venice_IDT = "S-Log3 Venice S-Gamut3"
-    #IDTs.append(SLog3Venice_IDT)
-    #LinVeniceSGamut3cine_IDT = "Linear Venice S-Gamut3.Cine"
-    #IDTs.append(LinVeniceSGamut3cine_IDT)
-    #SLog3VeniceCine_IDT = "S-Log3 Venice S-Gamut3.Cine"
-    #IDTs.append(SLog3VeniceCine_IDT)
-#    Cam709_IDT = "Camera Rec.709"
-#    IDTs.append(Cam709_IDT)
-#    P3_IDT = "sRGB Encoded P3-D65"
-#    IDTs.append(P3_IDT)
-#    ACEScg_IDT = "ACEScg"
-#    IDTs.append(ACEScg_IDT)
-#    ACES2065_1_IDT = "ACES2065-1"
-#    IDTs.append(ACES2065_1_IDT)
-#    Rec1886_Rec709_IDT = "Rec.1886 Rec.709 - Display"
-#    IDTs.append(Rec1886_Rec709_IDT)
-
+    ###Setting the OCIO transforms to be appraised during this appraisal
+    IDTs = [
+        # DJI
+        "D-Log D-Gamut",
+        # Apple
+        "Apple Log",
+        # ARRI
+        "ARRI LogC3 (EI800)",
+        "ARRI LogC4",
+        # Blackmagic
+        "BMDFilm WideGamut Gen5",
+        "DaVinci Intermediate WideGamut",
+        # Canon
+        "CanonLog2 CinemaGamut D55",
+        "CanonLog3 CinemaGamut D55",
+        # Panasonic
+        "V-Log V-Gamut",
+        # RED
+        "Log3G10 REDWideGamutRGB",
+        # Sony
+        "S-Log3 S-Gamut3",
+        "S-Log3 S-Gamut3.Cine",
+        "S-Log3 Venice S-Gamut3",
+        "S-Log3 Venice S-Gamut3.Cine",
+    ]
 
     ## defining the ODT
     Rec709_ODT = "Rec.1886 Rec.709 - Display"
     P3D65_ODT = "P3-D65 - Display"
 
     Src_VideoPath = args.video
-    SampleFrames = extract_frames(Src_VideoPath, args.samples)
+    if Src_VideoPath.lower().endswith(STILL_IMAGE_EXTENSIONS):
+        print(f"Still image detected — loading directly: {os.path.basename(Src_VideoPath)}")
+        SampleFrames = load_image(Src_VideoPath)
+    else:
+        SampleFrames = extract_frames(Src_VideoPath, args.samples)
 
     ArrayOfScores = []
     counter = 0
@@ -93,14 +68,35 @@ def main():
     outputPath = args.output
     os.makedirs(outputPath, exist_ok=True)
 
-    print("beginning analysis of ", len(IDTs), "IDTs")
+    # --- Stage 1: Gamut Wall Test (Log vs Display-Referred Detection) ---
+    gw_result = gamut_wall_test(SampleFrames, verbose=True, output_path=outputPath,
+                                 image_name=os.path.splitext(os.path.basename(Src_VideoPath))[0])
+    
+    if gw_result['is_display_referred']:
+        print(f"\n{'='*60}")
+        print(f"  ⚠️  STAGE 1 RESULT: Footage appears DISPLAY-REFERRED")
+        print(f"  Confidence: {gw_result['confidence']:.2f}")
+        print(f"  Log IDT scoring will proceed, but results may be unreliable.")
+        print(f"  Consider using an Inverse Tone Map (ITM) instead of a log IDT.")
+        print(f"{'='*60}")
+    else:
+        print(f"\n  ✅ Stage 1: Footage appears to be log-encoded (confidence: {1.0 - gw_result['confidence']:.2f})")
+
+    # --- Black Pedestal Diagnostic (DISABLED — too aggressive, eliminates 13/14 on real footage) ---
+    darkest_neutral = None
+
+    print(f"\n--- Scoring {len(IDTs)} IDTs ---")
+
+    AllBreakdowns = []
 
     for idt in IDTs :
         #print('running round number ', counter,'  of this loop')
         PenaltyScore = 0.0
         TransformedFrames = OCIO_CST(SampleFrames, config, idt, P3D65_ODT)
-#        PenaltyScore = ScoreIDTtransforms(SampleFrames, TransformedFrames, config, idt, P3D65_ODT)
+        PenaltyScore, breakdown = ScoreIDTtransforms(SampleFrames, TransformedFrames, config, idt, P3D65_ODT,
+                                                      darkest_neutral_luma=darkest_neutral)
         ArrayOfScores.append(PenaltyScore)
+        AllBreakdowns.append(breakdown)
 
         print("the Penalty score for the transform ", idt, " is  ", PenaltyScore)
 
@@ -109,6 +105,17 @@ def main():
         displayMeRGB = cv.cvtColor(displayMe8bit, cv.COLOR_RGB2BGR)
         dimensions = (1280, 720)
         #cv.imshow('this is the CST Frame', cv.resize(displayMeRGB, dimensions))
+
+        # Stamp IDT name and score onto the image
+        score_text = f"IDT: {idt}   Score: {PenaltyScore:.4f} (unscored)" if PenaltyScore == 0.0 else f"IDT: {idt}   Score: {PenaltyScore:.4f}"
+        font = cv.FONT_HERSHEY_SIMPLEX
+        font_scale = min(displayMeRGB.shape[1], displayMeRGB.shape[0]) / 1500.0
+        thickness = max(1, int(font_scale * 2))
+        padding = int(font_scale * 30) + 10
+        # Shadow for readability
+        cv.putText(displayMeRGB, score_text, (padding + 2, padding + 2), font, font_scale, (0, 0, 0), thickness + 2, cv.LINE_AA)
+        # White text on top
+        cv.putText(displayMeRGB, score_text, (padding, padding), font, font_scale, (255, 255, 255), thickness, cv.LINE_AA)
 
         outputName = os.path.join(outputPath, f"{idt}.png")
 
@@ -120,6 +127,17 @@ def main():
     min_pos = ArrayOfScores.index(min(ArrayOfScores))
 
     print("The Results are in, accordin to my studies, the least bad IDT for you to use is......", IDTs[min_pos])
+
+    # Write detailed score breakdown to CSV
+    reportPath = os.path.join(outputPath, "score_report.csv")
+    if AllBreakdowns:
+        fieldnames = list(AllBreakdowns[0].keys())
+        with open(reportPath, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for bd in sorted(AllBreakdowns, key=lambda x: x['FinalScore']):
+                writer.writerow({k: f"{v:.6f}" if isinstance(v, float) else v for k, v in bd.items()})
+        print(f"\nDetailed score report written to: {reportPath}")
 
 
     #Avg_SNR , Avg_Noise = CheckNoiseLevels(DJI2ODT_Frames)
