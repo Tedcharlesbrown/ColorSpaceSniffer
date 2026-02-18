@@ -2,12 +2,15 @@
 """
 weight_optimizer.py — brute-force weight search for ColorSpaceSniffer.
 
-Phase 1 (slow): Cache raw metric values for all test files × IDTs (84 evaluations).
+Phase 1 (slow): Cache raw metric values for all test files × IDTs.
 Phase 2 (fast): Vectorized random weight search over N combos using cached data.
+
+Ground truth is read from examples/ground_truth.csv.
+Files are resolved from examples/images/ (and examples/specialtest/ if it exists).
 
 Usage:
     source .venv/bin/activate
-    python3 src/weight_optimizer.py [--combos 50000]
+    python3 src/weight_optimizer.py [--combos 100000]
 """
 
 import sys
@@ -40,21 +43,44 @@ from metrics import (
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-IMAGES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          'examples', 'images')
+_EXAMPLES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              'examples')
 
-GROUND_TRUTH = {
-    'DXR_CAM01_SLog3.tiff': [
+# Directories to search for image files, in order of preference
+IMAGE_SEARCH_DIRS = [
+    os.path.join(_EXAMPLES_DIR, 'images'),
+    os.path.join(_EXAMPLES_DIR, 'specialtest'),
+]
+
+GROUND_TRUTH_CSV = os.path.join(_EXAMPLES_DIR, 'ground_truth.csv')
+
+# Aliases: a shorthand in the CSV expands to a list of acceptable IDT names
+IDT_ALIASES = {
+    'S-Log3': [
         'S-Log3 S-Gamut3', 'S-Log3 S-Gamut3.Cine',
-        'S-Log3 Venice S-Gamut3', 'S-Log3 Venice S-Gamut3.Cine'],
-    'DXR_CAM09_SLog3.tiff': [
-        'S-Log3 S-Gamut3', 'S-Log3 S-Gamut3.Cine',
-        'S-Log3 Venice S-Gamut3', 'S-Log3 Venice S-Gamut3.Cine'],
-    'DPTest_Cam01_VLog.tiff':     ['V-Log V-Gamut'],
-    'DPTest_Cam03_VLog.tiff':     ['V-Log V-Gamut'],
-    'DPTest_Cam09Fish_VLog.tiff': ['V-Log V-Gamut'],
-    'DPTest_Cam09Rect_VLog.tiff': ['V-Log V-Gamut'],
+        'S-Log3 Venice S-Gamut3', 'S-Log3 Venice S-Gamut3.Cine',
+    ],
 }
+
+
+def load_ground_truth(csv_path):
+    """Read ground_truth.csv → {filename: [correct_idt, ...]}."""
+    gt = {}
+    with open(csv_path, newline='') as f:
+        for row in csv.DictReader(f):
+            fname = row['filename'].strip()
+            raw   = row['correct_idt'].strip()
+            gt[fname] = IDT_ALIASES.get(raw, [raw])
+    return gt
+
+
+def resolve_path(filename):
+    """Search IMAGE_SEARCH_DIRS for filename; return full path or None."""
+    for d in IMAGE_SEARCH_DIRS:
+        p = os.path.join(d, filename)
+        if os.path.isfile(p):
+            return p
+    return None
 
 IDTs = [
     "D-Log D-Gamut",
@@ -190,42 +216,54 @@ def raw_to_feature_vec(raw):
 
 # ── Phase 1: Cache ───────────────────────────────────────────────────────────
 
-def build_cache(config):
+def build_cache(config, ground_truth):
     """Evaluate all test files × IDTs and cache results.
+
+    Args:
+        ground_truth: dict {filename: [correct_idt, ...]} from load_ground_truth()
 
     Returns:
         feature_matrix : np.ndarray (n_files, n_idts, n_features)
         psnr_matrix    : np.ndarray (n_files, n_idts)
-        file_names     : list[str]
+        file_names     : list[str]  filenames actually evaluated
         correct_indices: list[list[int]]  correct IDT indices per file
         raw_cache      : dict for optional CSV dump
     """
-    file_names = list(GROUND_TRUTH.keys())
-    n_files    = len(file_names)
-    n_idts     = len(IDTs)
+    # Resolve file paths — skip any file we can't find
+    file_names = []
+    file_paths = []
+    for fname, correct_idts in ground_truth.items():
+        p = resolve_path(fname)
+        if p is None:
+            print(f"  [SKIP] {fname} — not found in {IMAGE_SEARCH_DIRS}")
+            continue
+        file_names.append(fname)
+        file_paths.append(p)
+
+    n_files = len(file_names)
+    n_idts  = len(IDTs)
 
     feature_matrix = np.zeros((n_files, n_idts, N_FEATURES), dtype=np.float64)
     psnr_matrix    = np.zeros((n_files, n_idts),             dtype=np.float64)
-    raw_cache      = {}   # {filename: {idt: raw_dict}}
+    raw_cache      = {}
 
     correct_indices = []
     for fname in file_names:
         correct_indices.append([IDTs.index(idt)
-                                 for idt in GROUND_TRUTH[fname] if idt in IDTs])
+                                 for idt in ground_truth[fname] if idt in IDTs])
 
     total = n_files * n_idts
     done  = 0
     phase1_start = time.time()
 
-    for fi, fname in enumerate(file_names):
-        fpath = os.path.join(IMAGES_DIR, fname)
+    for fi, (fname, fpath) in enumerate(zip(file_names, file_paths)):
         print(f"\n[File {fi+1}/{n_files}] {fname}")
         frames = load_image(fpath)
         raw_cache[fname] = {}
 
         for ii, idt in enumerate(IDTs):
             done += 1
-            print(f"  [{done:2d}/{total}] {idt:<40}", end='', flush=True)
+            print(f"  [{done:3d}/{total}] {idt:<40}", end='', flush=True)
             t0 = time.time()
             try:
                 raw = compute_raw_metrics(frames, config, idt, ODT)
@@ -236,7 +274,7 @@ def build_cache(config):
                 print(f" {time.time()-t0:.1f}s")
             except Exception as e:
                 print(f" ERROR: {e}")
-                psnr_matrix[fi, ii] = 48.0   # neutral PSNR divisor
+                psnr_matrix[fi, ii] = 48.0
 
     elapsed = time.time() - phase1_start
     print(f"\nPhase 1 complete: {total} evaluations in {elapsed:.1f}s "
@@ -311,8 +349,8 @@ def per_file_ranks(feature_matrix, psnr_matrix, correct_indices, weights):
 
 def main():
     parser = argparse.ArgumentParser(description='ColorSpaceSniffer weight optimizer')
-    parser.add_argument('--combos', type=int, default=50000,
-                        help='Number of random weight combos to try (default 50000)')
+    parser.add_argument('--combos', type=int, default=100000,
+                        help='Number of random weight combos to try (default 100000)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility')
     parser.add_argument('--output', default='/tmp/weight_optimization_results.csv',
@@ -323,15 +361,24 @@ def main():
         'studio-config-v4.0.0_aces-v2.0_ocio-v2.5')
     print("Using built-in ACES Studio Config v4.0.0\n")
 
+    # ── Load ground truth ────────────────────────────────────────────────────
+    ground_truth = load_ground_truth(GROUND_TRUTH_CSV)
+    print(f"Loaded {len(ground_truth)} entries from {GROUND_TRUTH_CSV}")
+    for fname, idts in ground_truth.items():
+        print(f"  {fname:<50} → {', '.join(idts)}")
+
     # ── Phase 1 ──────────────────────────────────────────────────────────────
-    print("=" * 60)
+    print(f"\n{'='*60}")
     print("PHASE 1: Caching raw metrics")
-    print(f"  {len(GROUND_TRUTH)} files × {len(IDTs)} IDTs = "
-          f"{len(GROUND_TRUTH)*len(IDTs)} evaluations")
+    print(f"  up to {len(ground_truth)} files × {len(IDTs)} IDTs = "
+          f"up to {len(ground_truth)*len(IDTs)} evaluations")
     print("=" * 60)
 
     feature_matrix, psnr_matrix, file_names, correct_indices, raw_cache = \
-        build_cache(config)
+        build_cache(config, ground_truth)
+    n_files = len(file_names)
+    max_pts = n_files * 3
+    print(f"Evaluated {n_files} files. Max possible score: {max_pts} pts\n")
 
     # Print raw feature values for inspection
     print("\n── Cached feature values (pre-processed) ──────────────────")
@@ -351,7 +398,7 @@ def main():
         feature_matrix, psnr_matrix, correct_indices,
         CURRENT_WEIGHTS[None, :])
     print(f"\n── Baseline (current weights): "
-          f"{int(base_pts[0])}/18 pts, {int(base_top1[0])}/6 top-1 hits ──")
+          f"{int(base_pts[0])}/{max_pts} pts, {int(base_top1[0])}/{n_files} top-1 hits ──")
     for (rank, best_idt), fname in zip(
             per_file_ranks(feature_matrix, psnr_matrix,
                            correct_indices, CURRENT_WEIGHTS),
@@ -362,7 +409,7 @@ def main():
     # ── Phase 2 ──────────────────────────────────────────────────────────────
     n_combos = args.combos
     print(f"\n{'='*60}")
-    print(f"PHASE 2: Random weight search ({n_combos:,} combos)")
+    print(f"PHASE 2: Random weight search ({n_combos:,} combos, max {max_pts} pts)")
     print("=" * 60)
 
     rng = np.random.default_rng(args.seed)
@@ -390,8 +437,8 @@ def main():
         all_top1[start:end] = top1
         elapsed = time.time() - t0
         rate    = (end) / elapsed if elapsed > 0 else 0
-        print(f"  {end:>6,}/{n_combos:,}  "
-              f"best so far: {int(all_pts[:end].max())}/18 pts  "
+        print(f"  {end:>7,}/{n_combos:,}  "
+              f"best so far: {int(all_pts[:end].max())}/{max_pts} pts  "
               f"({rate:.0f} combos/s)", end='\r')
 
     elapsed = time.time() - t0
