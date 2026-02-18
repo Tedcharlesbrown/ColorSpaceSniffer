@@ -1,11 +1,11 @@
-filename,correct_idt
-ShortCowsNotch.tiff,ARRI LogC3 (EI800)
-ShortClip.tiff,D-Log D-Gamut
-DXR_CAM01_SLog3.tiff,S-Log3
-DXR_CAM09_SLog3.tiff,S-Log3
-DPTest_Cam01_VLog.tiff,V-Log V-Gamut
-DPTest_Cam03_VLog.tiff,V-Log V-Gamut
-DPTest_Cam09Fish_VLog.tiff,V-Log V-Gamut
-DPTest_Cam09Rect_VLog.tiff,V-Log V-Gamut
-CowTestSecretColorSpace00091004.tif,CanonLog3 CinemaGamut D55
-ZSTestSecretColorSpace00090318.tif,Log3G10 REDWideGamutRGB
+filename,correct_idt,source
+ShortCowsNotch_1080p.tiff,ARRI LogC3 (EI800),original_examples
+ShortClip_1080p.tiff,D-Log D-Gamut,original_examples
+DXR_CAM01_SLog3.tiff,S-Log3,malcolm_dropbox
+DXR_CAM09_SLog3.tiff,S-Log3,malcolm_dropbox
+DPTest_Cam01_VLog.tiff,V-Log V-Gamut,malcolm_dropbox
+DPTest_Cam03_VLog.tiff,V-Log V-Gamut,malcolm_dropbox
+DPTest_Cam09Fish_VLog.tiff,V-Log V-Gamut,malcolm_dropbox
+DPTest_Cam09Rect_VLog.tiff,V-Log V-Gamut,malcolm_dropbox
+CowTestSecretColorSpace00091004.tif,CanonLog3 CinemaGamut D55,malcolm_specialtest
+ZSTestSecretColorSpace00090318.tif,Log3G10 REDWideGamutRGB,malcolm_specialtest
